@@ -1,0 +1,129 @@
+  version: '3.8'
+
+  services:
+    # MySQL Database
+    mysql:
+      image: mysql:8.0
+      container_name: confiance-mysql
+      environment:
+        MYSQL_ROOT_PASSWORD: root
+        MYSQL_DATABASE: confiance_users
+      ports:
+        - "3306:3306"
+      volumes:
+        - mysql-data:/var/lib/mysql
+      networks:
+        - confiance-network
+      healthcheck:
+        test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+        timeout: 20s
+        retries: 10
+
+    # Redis Cache
+    redis:
+      image: redis:7-alpine
+      container_name: confiance-redis
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis-data:/data
+      networks:
+        - confiance-network
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 5s
+        timeout: 3s
+        retries: 5
+
+    # Discovery Service (Eureka)
+    discovery-service:
+      build:
+        context: ../discovery-service
+        dockerfile: Dockerfile
+      container_name: discovery-service
+      ports:
+        - "8761:8761"
+      networks:
+        - confiance-network
+      environment:
+        - SPRING_PROFILES_ACTIVE=docker
+      healthcheck:
+        test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8761/actuator/health"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+    # API Gateway
+    api-gateway:
+      build:
+        context: ../api-gateway
+        dockerfile: Dockerfile
+      container_name: api-gateway
+      ports:
+        - "8080:8080"
+      depends_on:
+        discovery-service:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
+      networks:
+        - confiance-network
+      environment:
+        - SPRING_PROFILES_ACTIVE=docker
+        - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+        - SPRING_REDIS_HOST=redis
+
+    # Auth Service
+    auth-service:
+      build:
+        context: ../auth-service
+        dockerfile: Dockerfile
+      container_name: auth-service
+      ports:
+        - "8081:8081"
+      depends_on:
+        mysql:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
+        discovery-service:
+          condition: service_healthy
+      networks:
+        - confiance-network
+      environment:
+        - SPRING_PROFILES_ACTIVE=docker
+        - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_auth?createDatabaseIfNotExist=true
+        - SPRING_DATASOURCE_USERNAME=root
+        - SPRING_DATASOURCE_PASSWORD=root
+        - SPRING_REDIS_HOST=redis
+        - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+
+    # User Service
+    user-service:
+      build:
+        context: ../user-service
+        dockerfile: Dockerfile
+      container_name: user-service
+      ports:
+        - "8082:8082"
+      depends_on:
+        mysql:
+          condition: service_healthy
+        discovery-service:
+          condition: service_healthy
+      networks:
+        - confiance-network
+      environment:
+        - SPRING_PROFILES_ACTIVE=docker
+        - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_users?createDatabaseIfNotExist=true
+        - SPRING_DATASOURCE_USERNAME=root
+        - SPRING_DATASOURCE_PASSWORD=root
+        - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+
+  networks:
+    confiance-network:
+      driver: bridge
+
+  volumes:
+    mysql-data:
+    redis-data:

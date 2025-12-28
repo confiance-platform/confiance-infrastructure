@@ -1,0 +1,168 @@
+version: '3.8'
+
+# Production Docker Compose Configuration
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: confiance-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: confiance_users
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - confiance-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: confiance-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - confiance-network
+    restart: unless-stopped
+
+  discovery-service:
+    image: ${DOCKER_USERNAME}/confiance-discovery-service:${IMAGE_TAG:-latest}
+    container_name: discovery-service
+    ports:
+      - "8761:8761"
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+    restart: unless-stopped
+
+  api-gateway:
+    image: ${DOCKER_USERNAME}/confiance-api-gateway:${IMAGE_TAG:-latest}
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - discovery-service
+      - redis
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - SPRING_REDIS_HOST=redis
+    restart: unless-stopped
+
+  auth-service:
+    image: ${DOCKER_USERNAME}/confiance-auth-service:${IMAGE_TAG:-latest}
+    container_name: auth-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mysql
+      - redis
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_auth?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - SPRING_REDIS_HOST=redis
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - JWT_SECRET=${JWT_SECRET}
+    restart: unless-stopped
+
+  user-service:
+    image: ${DOCKER_USERNAME}/confiance-user-service:${IMAGE_TAG:-latest}
+    container_name: user-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      - mysql
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_users?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - JWT_SECRET=${JWT_SECRET}
+    restart: unless-stopped
+
+  investment-service:
+    image: ${DOCKER_USERNAME}/confiance-investment-service:${IMAGE_TAG:-latest}
+    container_name: investment-service
+    ports:
+      - "8084:8084"
+    depends_on:
+      - mysql
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_investments?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+    restart: unless-stopped
+
+  transaction-service:
+    image: ${DOCKER_USERNAME}/confiance-transaction-service:${IMAGE_TAG:-latest}
+    container_name: transaction-service
+    ports:
+      - "8085:8085"
+    depends_on:
+      - mysql
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_transactions?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+    restart: unless-stopped
+
+  portfolio-service:
+    image: ${DOCKER_USERNAME}/confiance-portfolio-service:${IMAGE_TAG:-latest}
+    container_name: portfolio-service
+    ports:
+      - "8086:8086"
+    depends_on:
+      - mysql
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/confiance_portfolios?createDatabaseIfNotExist=true
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+    restart: unless-stopped
+
+  notification-service:
+    image: ${DOCKER_USERNAME}/confiance-notification-service:${IMAGE_TAG:-latest}
+    container_name: notification-service
+    ports:
+      - "8083:8083"
+    depends_on:
+      - discovery-service
+    networks:
+      - confiance-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+    restart: unless-stopped
+
+networks:
+  confiance-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
